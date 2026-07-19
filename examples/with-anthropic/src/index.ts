@@ -1,41 +1,66 @@
-import { Agent, Memory, VoltAgent, createTool } from "@voltagent/core";
-import { LibSQLMemoryAdapter } from "@voltagent/libsql";
+import { VoltAgent, VoltOpsClient } from "@voltagent/core";
 import { createPinoLogger } from "@voltagent/logger";
 import { honoServer } from "@voltagent/server-hono";
-import { z } from "zod";
+import {
+  codeScannerAgent,
+  editorAgent,
+  generalAgent,
+  geographyAgent,
+  historyAgent,
+  mathAgent,
+  publishingCoordinator,
+  readmeSummarizerAgent,
+  reasoningAgent,
+  recordProcessorAgent,
+  repoAnalyzer,
+  routingSupervisor,
+  scienceAgent,
+  supportAgent,
+  webSearchAgent,
+} from "./agents";
 
-// Create logger
 const logger = createPinoLogger({
   name: "with-anthropic",
   level: "info",
 });
 
-const weatherTool = createTool({
-  name: "get_current_weather",
-  description: "Get the current weather in a location",
-  // Use Zod schema instead of JSON Schema
-  parameters: z.object({
-    location: z.string().describe("The location to get weather for"),
-  }),
-  execute: async (input) => {
-    return {
-      location: input.location,
-    };
-  },
-});
-
-const agent = new Agent({
-  name: "weather-agent",
-  instructions:
-    "A helpful assistant that can search the web and get weather information. This agent is specifically designed to test the VoltAgent tool_result bug with MCP tools.",
-  model: "anthropic/claude-opus-4-1",
-  tools: [weatherTool],
-});
+// VoltOps is attached only when credentials are present. Without it, the
+// dynamic support-agent falls back to its local drafted prompt file.
+const voltOpsClient =
+  process.env.VOLTAGENT_PUBLIC_KEY && process.env.VOLTAGENT_SECRET_KEY
+    ? new VoltOpsClient({
+        publicKey: process.env.VOLTAGENT_PUBLIC_KEY,
+        secretKey: process.env.VOLTAGENT_SECRET_KEY,
+      })
+    : undefined;
 
 new VoltAgent({
   agents: {
-    agent,
+    // 1. Supervisor / routing (+ its specialist team)
+    routingSupervisor,
+    general: generalAgent,
+    geography: geographyAgent,
+    history: historyAgent,
+    science: scienceAgent,
+    // 2. Tool-orchestration workflow
+    publishingCoordinator,
+    // 3. Structured reasoning / tool-using
+    reasoningAgent,
+    // 4. Sub-agent supervisor (+ its sub-agents)
+    repoAnalyzer,
+    codeScanner: codeScannerAgent,
+    readmeSummarizer: readmeSummarizerAgent,
+    // 5. Role + JSON output
+    math: mathAgent,
+    // 6. Capability-list / tool agent
+    webSearchAgent,
+    // 7. Task / output-constrained
+    editorAgent,
+    recordProcessor: recordProcessorAgent,
+    // 9. Dynamic (VoltOps) instruction
+    supportAgent,
   },
   logger,
   server: honoServer({ port: 3141 }),
+  ...(voltOpsClient ? { voltOpsClient } : {}),
 });
