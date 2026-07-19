@@ -13,7 +13,8 @@
   "devDependencies": {
     "@types/node": "^24.2.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
   },
   "keywords": [
     "agent",
@@ -31,6 +32,7 @@
     "build": "tsc",
     "dev": "tsx watch --env-file=.env ./src ",
     "start": "node dist/index.js",
+    "test": "vitest run",
     "volt": "volt"
   },
   "type": "module"
