@@ -1,56 +1,55 @@
-import { describe, expect, it, vi } from "vitest";
 import type { PromptHelper } from "@voltagent/core";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-const resolvePromptMock = vi.fn(async () => "resolved-prompt-content");
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-}));
-
-vi.mock("../prompts", () => ({
-  resolvePrompt: resolvePromptMock,
-}));
-
-const { supportAgent } = await import("./support-agent");
-const { MODEL } = await import("../model");
+import { describe, expect, it, vi } from "vitest";
+import { MODEL } from "../model";
+import { supportAgent } from "./support-agent";
 
 describe("supportAgent", () => {
-  it("is named 'support-agent' and uses the shared MODEL", () => {
-    expect((supportAgent as any).name).toBe("support-agent");
-    expect((supportAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(supportAgent.model).toBe(MODEL);
   });
 
-  it("resolves its instructions dynamically via resolvePrompt", async () => {
-    const instructions = (supportAgent as any).instructions as (
-      options: { prompts: PromptHelper },
-    ) => Promise<string>;
-    expect(typeof instructions).toBe("function");
+  it("has the expected name", () => {
+    expect(supportAgent.name).toBe("support-agent");
+  });
 
-    const fakePrompts = { getPrompt: vi.fn() } as unknown as PromptHelper;
-    const result = await instructions({ prompts: fakePrompts });
+  it("has no tools or sub-agents", () => {
+    expect(supportAgent.getTools()).toHaveLength(0);
+    expect(supportAgent.getSubAgents()).toHaveLength(0);
+  });
 
-    expect(resolvePromptMock).toHaveBeenCalledWith(fakePrompts, "customer-support-agent", {
-      companyName: "VoltAgent",
-      tone: "warm and professional",
-      subscriptionTier: "Pro",
+  it("uses a dynamic (function) instructions value rather than a static string", () => {
+    expect(typeof supportAgent.instructions).toBe("function");
+  });
+
+  it("falls back to a graceful default when no VoltOps prompt helper and no local prompt file are available", async () => {
+    const instructions = supportAgent.instructions as (options: {
+      prompts: PromptHelper | undefined;
+    }) => Promise<unknown>;
+
+    const result = await instructions({ prompts: undefined });
+
+    expect(result).toBe(
+      'You are a helpful assistant (prompt "customer-support-agent" could not be loaded).',
+    );
+  });
+
+  it("resolves via the VoltOps prompt helper with the expected reference when available", async () => {
+    const getPrompt = vi.fn().mockResolvedValue("resolved managed prompt");
+    const instructions = supportAgent.instructions as (options: {
+      prompts: PromptHelper;
+    }) => Promise<unknown>;
+
+    const result = await instructions({ prompts: { getPrompt } as unknown as PromptHelper });
+
+    expect(getPrompt).toHaveBeenCalledWith({
+      promptName: "customer-support-agent",
+      label: "production",
+      variables: {
+        companyName: "VoltAgent",
+        tone: "warm and professional",
+        subscriptionTier: "Pro",
+      },
     });
-    expect(result).toBe("resolved-prompt-content");
-  });
-
-  it("passes through whatever resolvePrompt returns, including non-string PromptContent", async () => {
-    resolvePromptMock.mockResolvedValueOnce({ type: "text", text: "structured content" } as any);
-    const instructions = (supportAgent as any).instructions as (
-      options: { prompts: PromptHelper },
-    ) => Promise<unknown>;
-
-    const result = await instructions({ prompts: undefined as unknown as PromptHelper });
-
-    expect(result).toEqual({ type: "text", text: "structured content" });
+    expect(result).toBe("resolved managed prompt");
   });
 });

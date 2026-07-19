@@ -1,129 +1,163 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import type { PromptHelper } from "@voltagent/core";
-
-const readFileSyncMock = vi.fn<(...args: unknown[]) => string>();
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolvePrompt } from "./prompts";
 
 vi.mock("node:fs", () => ({
-  readFileSync: readFileSyncMock,
+  readFileSync: vi.fn(),
 }));
 
-const { resolvePrompt } = await import("./prompts");
+const mockedReadFileSync = readFileSync as unknown as ReturnType<typeof vi.fn>;
 
 describe("resolvePrompt", () => {
   beforeEach(() => {
-    readFileSyncMock.mockReset();
+    mockedReadFileSync.mockReset();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
   describe("VoltOps-managed path", () => {
-    it("fetches the 'production' labelled prompt with the given variables", async () => {
-      const getPrompt = vi.fn().mockResolvedValue({ type: "text", text: "Hello from VoltOps" });
+    it("returns the prompt content from prompts.getPrompt without touching the filesystem", async () => {
+      const getPrompt = vi.fn().mockResolvedValue("Managed prompt content");
       const prompts = { getPrompt } as unknown as PromptHelper;
 
-      const result = await resolvePrompt(prompts, "customer-support-agent", { companyName: "Acme" });
+      const result = await resolvePrompt(prompts, "customer-support-agent", {
+        companyName: "Acme",
+      });
 
+      expect(result).toBe("Managed prompt content");
       expect(getPrompt).toHaveBeenCalledWith({
         promptName: "customer-support-agent",
         label: "production",
         variables: { companyName: "Acme" },
       });
-      expect(result).toEqual({ type: "text", text: "Hello from VoltOps" });
-      expect(readFileSyncMock).not.toHaveBeenCalled();
+      expect(mockedReadFileSync).not.toHaveBeenCalled();
     });
 
-    it("falls back to the local prompt file when getPrompt rejects", async () => {
-      const getPrompt = vi.fn().mockRejectedValue(new Error("network error"));
+    it("falls back to the local prompt when prompts.getPrompt throws", async () => {
+      const getPrompt = vi.fn().mockRejectedValue(new Error("VoltOps unreachable"));
       const prompts = { getPrompt } as unknown as PromptHelper;
-      readFileSyncMock.mockReturnValue("Local fallback body");
+      mockedReadFileSync.mockReturnValue("Local fallback body");
+
+      const result = await resolvePrompt(prompts, "customer-support-agent");
+
+      expect(getPrompt).toHaveBeenCalled();
+      expect(result).toBe("Local fallback body");
+    });
+
+    it("falls back to the local prompt when getPrompt is not a function", async () => {
+      const prompts = {} as unknown as PromptHelper;
+      mockedReadFileSync.mockReturnValue("Local fallback body");
 
       const result = await resolvePrompt(prompts, "customer-support-agent");
 
       expect(result).toBe("Local fallback body");
-      expect(readFileSyncMock).toHaveBeenCalled();
     });
   });
 
-  describe("local drafted-prompt fallback", () => {
-    it("falls back to the local file when no prompt helper is provided", async () => {
-      readFileSyncMock.mockReturnValue("Hello {{name}}, welcome to {{companyName}}.");
+  describe("local drafted prompt fallback", () => {
+    it("falls back to the local prompt when no PromptHelper is provided", async () => {
+      mockedReadFileSync.mockReturnValue("Plain instructions with no frontmatter.");
 
-      const result = await resolvePrompt(undefined, "greeting", {
-        name: "Ada",
+      const result = await resolvePrompt(undefined, "customer-support-agent");
+
+      expect(result).toBe("Plain instructions with no frontmatter.");
+    });
+
+    it("reads the file from the .voltagent/prompts directory using the prompt name", async () => {
+      mockedReadFileSync.mockReturnValue("Some content");
+
+      await resolvePrompt(undefined, "my-prompt");
+
+      expect(mockedReadFileSync).toHaveBeenCalledTimes(1);
+      const [calledPath, encoding] = mockedReadFileSync.mock.calls[0];
+      expect(calledPath).toMatch(/\.voltagent[/\\]prompts[/\\]my-prompt\.md$/);
+      expect(encoding).toBe("utf8");
+    });
+
+    it("substitutes {{variables}} in a plain-text prompt", async () => {
+      mockedReadFileSync.mockReturnValue(
+        "Hello {{companyName}}, please respond in a {{tone}} tone.",
+      );
+
+      const result = await resolvePrompt(undefined, "customer-support-agent", {
+        companyName: "VoltAgent",
+        tone: "warm and professional",
+      });
+
+      expect(result).toBe("Hello VoltAgent, please respond in a warm and professional tone.");
+    });
+
+    it("replaces unknown variables with an empty string", async () => {
+      mockedReadFileSync.mockReturnValue("Tier: {{subscriptionTier}}.");
+
+      const result = await resolvePrompt(undefined, "customer-support-agent", {});
+
+      expect(result).toBe("Tier: .");
+    });
+
+    it("parses YAML-style frontmatter and returns only the body for a text prompt", async () => {
+      mockedReadFileSync.mockReturnValue(
+        ["---", "type: text", "---", "Hi {{companyName}}!"].join("\n"),
+      );
+
+      const result = await resolvePrompt(undefined, "customer-support-agent", {
         companyName: "Acme",
       });
 
-      expect(result).toBe("Hello Ada, welcome to Acme.");
+      expect(result).toBe("Hi Acme!");
     });
 
-    it("falls back to the local file when prompts.getPrompt is not a function", async () => {
-      readFileSyncMock.mockReturnValue("Plain text body {{x}}");
+    it("parses a chat-type frontmatter prompt into a PromptContent object", async () => {
+      const chatBody = JSON.stringify([
+        { role: "system", content: "You work for {{companyName}}." },
+        { role: "user", content: "Hello!" },
+      ]);
+      mockedReadFileSync.mockReturnValue(["---", "type: chat", "---", chatBody].join("\n"));
 
-      const result = await resolvePrompt({} as unknown as PromptHelper, "p", { x: "1" });
-
-      expect(result).toBe("Plain text body 1");
-    });
-
-    it("defaults to an empty variables object when none is supplied", async () => {
-      readFileSyncMock.mockReturnValue("Hi {{missing}}!");
-
-      const result = await resolvePrompt(undefined, "p");
-
-      expect(result).toBe("Hi !");
-    });
-
-    it("parses '---\\ntype: text\\n---' frontmatter and trims the body", async () => {
-      readFileSyncMock.mockReturnValue("---\ntype: text\n---\n  Hello {{name}}.  ");
-
-      const result = await resolvePrompt(undefined, "text-prompt", { name: "Bob" });
-
-      expect(result).toBe("Hello Bob.");
-    });
-
-    it("treats content without frontmatter as a plain text prompt", async () => {
-      readFileSyncMock.mockReturnValue("  Just a plain prompt with {{var}}.  ");
-
-      const result = await resolvePrompt(undefined, "no-frontmatter", { var: "value" });
-
-      expect(result).toBe("Just a plain prompt with value.");
-    });
-
-    it("parses '---\\ntype: chat\\n---' frontmatter and substitutes variables per message", async () => {
-      readFileSyncMock.mockReturnValue(
-        `---\ntype: chat\n---\n${JSON.stringify([
-          { role: "system", content: "You are {{persona}}." },
-          { role: "user", content: "Hello, {{name}}!" },
-        ])}`,
-      );
-
-      const result = await resolvePrompt(undefined, "chat-prompt", {
-        persona: "a helpful assistant",
-        name: "Bob",
+      const result = await resolvePrompt(undefined, "customer-support-agent", {
+        companyName: "Acme",
       });
 
       expect(result).toEqual({
         type: "chat",
         messages: [
-          { role: "system", content: "You are a helpful assistant." },
-          { role: "user", content: "Hello, Bob!" },
+          { role: "system", content: "You work for Acme." },
+          { role: "user", content: "Hello!" },
         ],
       });
     });
 
-    it("returns a generic fallback string when the local prompt file cannot be read", async () => {
-      readFileSyncMock.mockImplementation(() => {
+    it("treats the prompt as text when the frontmatter type is missing", async () => {
+      mockedReadFileSync.mockReturnValue(["---", "description: some metadata", "---", "Plain body"].join("\n"));
+
+      const result = await resolvePrompt(undefined, "customer-support-agent");
+
+      expect(result).toBe("Plain body");
+    });
+
+    it("returns a graceful default when the prompt file cannot be read", async () => {
+      mockedReadFileSync.mockImplementation(() => {
         throw new Error("ENOENT: no such file or directory");
       });
 
       const result = await resolvePrompt(undefined, "missing-prompt");
 
-      expect(result).toBe('You are a helpful assistant (prompt "missing-prompt" could not be loaded).');
+      expect(result).toBe(
+        'You are a helpful assistant (prompt "missing-prompt" could not be loaded).',
+      );
     });
 
-    it("returns the generic fallback when a chat prompt body is invalid JSON", async () => {
-      readFileSyncMock.mockReturnValue("---\ntype: chat\n---\nnot valid json");
+    it("returns the graceful default when the chat body is malformed JSON", async () => {
+      mockedReadFileSync.mockReturnValue(["---", "type: chat", "---", "not valid json"].join("\n"));
 
-      const result = await resolvePrompt(undefined, "broken-chat");
+      const result = await resolvePrompt(undefined, "broken-chat-prompt");
 
-      expect(result).toBe('You are a helpful assistant (prompt "broken-chat" could not be loaded).');
+      expect(result).toBe(
+        'You are a helpful assistant (prompt "broken-chat-prompt" could not be loaded).',
+      );
     });
   });
 });

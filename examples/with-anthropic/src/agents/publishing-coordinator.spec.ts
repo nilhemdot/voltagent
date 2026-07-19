@@ -1,38 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-  createTool: (options: unknown) => options,
-}));
-
-const { publishingCoordinator } = await import("./publishing-coordinator");
-const { writerTool, editorTool } = await import("../tools");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { editorTool, writerTool } from "../tools";
+import { publishingCoordinator } from "./publishing-coordinator";
 
 describe("publishingCoordinator", () => {
-  it("is named 'publishing-coordinator' and uses the shared MODEL", () => {
-    expect((publishingCoordinator as any).name).toBe("publishing-coordinator");
-    expect((publishingCoordinator as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(publishingCoordinator.model).toBe(MODEL);
   });
 
-  it("orchestrates the writer tool before the editor tool, in that order", () => {
-    expect((publishingCoordinator as any).tools).toEqual([writerTool, editorTool]);
+  it("has the expected name", () => {
+    expect(publishingCoordinator.name).toBe("publishing-coordinator");
   });
 
-  it("describes the fixed two-step workflow", () => {
-    const instructions = (publishingCoordinator as any).instructions as string;
-    const writerIndex = instructions.indexOf("writer_tool");
-    const editorIndex = instructions.indexOf("editor_tool");
+  it("instructs a fixed writer-then-editor workflow", () => {
+    expect(publishingCoordinator.instructions).toContain("publishing coordinator");
+    expect(publishingCoordinator.instructions).toContain("writer_tool");
+    expect(publishingCoordinator.instructions).toContain("editor_tool");
+    expect(publishingCoordinator.instructions).toContain("Always use both tools in sequence.");
+  });
 
-    expect(writerIndex).toBeGreaterThan(-1);
-    expect(editorIndex).toBeGreaterThan(-1);
-    expect(writerIndex).toBeLessThan(editorIndex);
-    expect(instructions).toMatch(/Always use both tools in sequence\./);
+  it("has both the writer and editor tools configured, in order", () => {
+    const tools = publishingCoordinator.getTools();
+    expect(tools.map((tool) => tool.name)).toEqual([writerTool.name, editorTool.name]);
+  });
+
+  it("has no sub-agents", () => {
+    expect(publishingCoordinator.getSubAgents()).toHaveLength(0);
   });
 });

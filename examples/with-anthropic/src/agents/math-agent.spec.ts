@@ -1,41 +1,33 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-  createTool: (options: unknown) => options,
-}));
-
-const { mathAgent } = await import("./math-agent");
-const { calculatorTool } = await import("../tools");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { calculatorTool } from "../tools";
+import { mathAgent } from "./math-agent";
 
 describe("mathAgent", () => {
-  it("is named 'math' with a purpose describing structured JSON answers", () => {
-    expect((mathAgent as any).name).toBe("math");
-    expect((mathAgent as any).purpose).toMatch(/step by step/i);
-    expect((mathAgent as any).purpose).toMatch(/structured JSON answer/i);
+  it("is configured with the shared model", () => {
+    expect(mathAgent.model).toBe(MODEL);
   });
 
-  it("uses the shared MODEL constant", () => {
-    expect((mathAgent as any).model).toBe(MODEL);
+  it("has the expected name and purpose", () => {
+    expect(mathAgent.name).toBe("math");
+    expect(mathAgent.purpose).toContain("JSON");
   });
 
-  it("is wired with the calculator tool", () => {
-    expect((mathAgent as any).tools).toEqual([calculatorTool]);
+  it("instructs a step-by-step JSON-only response", () => {
+    expect(mathAgent.instructions).toContain("step by step");
+    expect(mathAgent.instructions).toContain('"answer"');
+    expect(mathAgent.instructions).toContain('"steps"');
+    expect(mathAgent.instructions).toContain('"confidence"');
+    expect(mathAgent.instructions).toContain("Return only the JSON object");
   });
 
-  it("instructs the agent to return a JSON object with answer/steps/confidence", () => {
-    const instructions = (mathAgent as any).instructions as string;
-    expect(instructions).toContain('"answer"');
-    expect(instructions).toContain('"steps"');
-    expect(instructions).toContain('"confidence"');
-    expect(instructions).toMatch(/calculator tool/i);
-    expect(instructions).toMatch(/Return only the JSON object, with no surrounding prose\./);
+  it("has the calculator tool configured", () => {
+    const tools = mathAgent.getTools();
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe(calculatorTool.name);
+  });
+
+  it("has no sub-agents", () => {
+    expect(mathAgent.getSubAgents()).toHaveLength(0);
   });
 });

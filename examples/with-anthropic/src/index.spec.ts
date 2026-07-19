@@ -1,145 +1,140 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Distinct sentinel objects so we can assert on identity/wiring without
-// depending on the real (pre-existing) Agent implementation.
-const mockAgents = {
-  routingSupervisor: { __id: "routing-supervisor" },
-  generalAgent: { __id: "general" },
-  geographyAgent: { __id: "geography" },
-  historyAgent: { __id: "history" },
-  scienceAgent: { __id: "science" },
-  publishingCoordinator: { __id: "publishing-coordinator" },
-  reasoningAgent: { __id: "reasoning-agent" },
-  repoAnalyzer: { __id: "repo-analyzer" },
-  codeScannerAgent: { __id: "code-scanner" },
-  readmeSummarizerAgent: { __id: "readme-summarizer" },
-  mathAgent: { __id: "math" },
-  webSearchAgent: { __id: "web-search-agent" },
-  editorAgent: { __id: "editor-agent" },
-  recordProcessorAgent: { __id: "record-processor" },
-  supportAgent: { __id: "support-agent" },
-};
-
-let voltAgentCalls: any[] = [];
-let voltOpsClientCalls: any[] = [];
-let honoServerCalls: any[] = [];
-let createPinoLoggerCalls: any[] = [];
-
-const loggerSentinel = { __logger: true };
-const serverSentinel = { __server: true };
-
-vi.mock("./agents", () => mockAgents);
-
-vi.mock("@voltagent/core", () => ({
-  VoltAgent: class {
-    constructor(options: unknown) {
-      voltAgentCalls.push(options);
-    }
-  },
-  VoltOpsClient: class {
-    publicKey?: string;
-    secretKey?: string;
-    constructor(options: { publicKey?: string; secretKey?: string }) {
-      voltOpsClientCalls.push(options);
-      this.publicKey = options.publicKey;
-      this.secretKey = options.secretKey;
-    }
-  },
+// `vi.mock` factories are hoisted above imports, so any values they need to
+// share with the test body must be created through `vi.hoisted`.
+const agentMocks = vi.hoisted(() => ({
+  routingSupervisor: { name: "routingSupervisor" },
+  generalAgent: { name: "generalAgent" },
+  geographyAgent: { name: "geographyAgent" },
+  historyAgent: { name: "historyAgent" },
+  scienceAgent: { name: "scienceAgent" },
+  publishingCoordinator: { name: "publishingCoordinator" },
+  reasoningAgent: { name: "reasoningAgent" },
+  repoAnalyzer: { name: "repoAnalyzer" },
+  codeScannerAgent: { name: "codeScannerAgent" },
+  readmeSummarizerAgent: { name: "readmeSummarizerAgent" },
+  mathAgent: { name: "mathAgent" },
+  webSearchAgent: { name: "webSearchAgent" },
+  editorAgent: { name: "editorAgent" },
+  recordProcessorAgent: { name: "recordProcessorAgent" },
+  supportAgent: { name: "supportAgent" },
 }));
 
-vi.mock("@voltagent/logger", () => ({
-  createPinoLogger: (options: unknown) => {
-    createPinoLoggerCalls.push(options);
-    return loggerSentinel;
-  },
+const coreMocks = vi.hoisted(() => ({
+  VoltAgent: vi.fn(),
+  VoltOpsClient: vi.fn().mockImplementation((opts: unknown) => ({
+    __marker: "voltOpsClientInstance",
+    opts,
+  })),
 }));
 
-vi.mock("@voltagent/server-hono", () => ({
-  honoServer: (options: unknown) => {
-    honoServerCalls.push(options);
-    return serverSentinel;
-  },
+const loggerMocks = vi.hoisted(() => ({
+  createPinoLogger: vi.fn(() => ({ __marker: "loggerInstance" })),
 }));
 
-describe("with-anthropic entrypoint", () => {
-  const originalEnv = { ...process.env };
+const serverMocks = vi.hoisted(() => ({
+  honoServer: vi.fn((opts: unknown) => ({ __marker: "serverInstance", opts })),
+}));
 
+vi.mock("./agents", () => agentMocks);
+vi.mock("@voltagent/core", () => coreMocks);
+vi.mock("@voltagent/logger", () => loggerMocks);
+vi.mock("@voltagent/server-hono", () => serverMocks);
+
+const ORIGINAL_ENV = { ...process.env };
+
+describe("with-anthropic bootstrap (src/index.ts)", () => {
   beforeEach(() => {
-    voltAgentCalls = [];
-    voltOpsClientCalls = [];
-    honoServerCalls = [];
-    createPinoLoggerCalls = [];
     vi.resetModules();
-    process.env = { ...originalEnv };
+    process.env = { ...ORIGINAL_ENV };
     delete process.env.VOLTAGENT_PUBLIC_KEY;
     delete process.env.VOLTAGENT_SECRET_KEY;
+    coreMocks.VoltAgent.mockClear();
+    coreMocks.VoltOpsClient.mockClear();
+    loggerMocks.createPinoLogger.mockClear();
+    serverMocks.honoServer.mockClear();
   });
 
   afterEach(() => {
-    process.env = originalEnv;
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("creates a Pino logger scoped to this example", async () => {
+    await import("./index");
+
+    expect(loggerMocks.createPinoLogger).toHaveBeenCalledWith({
+      name: "with-anthropic",
+      level: "info",
+    });
+  });
+
+  it("starts the Hono server on port 3141", async () => {
+    await import("./index");
+
+    expect(serverMocks.honoServer).toHaveBeenCalledWith({ port: 3141 });
   });
 
   it("registers every agent under its documented key", async () => {
     await import("./index");
 
-    expect(voltAgentCalls).toHaveLength(1);
-    const options = voltAgentCalls[0];
+    expect(coreMocks.VoltAgent).toHaveBeenCalledTimes(1);
+    const options = coreMocks.VoltAgent.mock.calls[0][0];
 
     expect(options.agents).toEqual({
-      routingSupervisor: mockAgents.routingSupervisor,
-      general: mockAgents.generalAgent,
-      geography: mockAgents.geographyAgent,
-      history: mockAgents.historyAgent,
-      science: mockAgents.scienceAgent,
-      publishingCoordinator: mockAgents.publishingCoordinator,
-      reasoningAgent: mockAgents.reasoningAgent,
-      repoAnalyzer: mockAgents.repoAnalyzer,
-      codeScanner: mockAgents.codeScannerAgent,
-      readmeSummarizer: mockAgents.readmeSummarizerAgent,
-      math: mockAgents.mathAgent,
-      webSearchAgent: mockAgents.webSearchAgent,
-      editorAgent: mockAgents.editorAgent,
-      recordProcessor: mockAgents.recordProcessorAgent,
-      supportAgent: mockAgents.supportAgent,
+      routingSupervisor: agentMocks.routingSupervisor,
+      general: agentMocks.generalAgent,
+      geography: agentMocks.geographyAgent,
+      history: agentMocks.historyAgent,
+      science: agentMocks.scienceAgent,
+      publishingCoordinator: agentMocks.publishingCoordinator,
+      reasoningAgent: agentMocks.reasoningAgent,
+      repoAnalyzer: agentMocks.repoAnalyzer,
+      codeScanner: agentMocks.codeScannerAgent,
+      readmeSummarizer: agentMocks.readmeSummarizerAgent,
+      math: agentMocks.mathAgent,
+      webSearchAgent: agentMocks.webSearchAgent,
+      editorAgent: agentMocks.editorAgent,
+      recordProcessor: agentMocks.recordProcessorAgent,
+      supportAgent: agentMocks.supportAgent,
     });
   });
 
-  it("configures the pino logger and hono server", async () => {
+  it("does not configure a VoltOpsClient when credentials are absent", async () => {
     await import("./index");
 
-    const options = voltAgentCalls[0];
-    expect(createPinoLoggerCalls).toEqual([{ name: "with-anthropic", level: "info" }]);
-    expect(honoServerCalls).toEqual([{ port: 3141 }]);
-    expect(options.logger).toBe(loggerSentinel);
-    expect(options.server).toBe(serverSentinel);
+    expect(coreMocks.VoltOpsClient).not.toHaveBeenCalled();
+    const options = coreMocks.VoltAgent.mock.calls[0][0];
+    expect(options).not.toHaveProperty("voltOpsClient");
   });
 
-  it("does not attach a VoltOpsClient when credentials are absent", async () => {
+  it("configures a VoltOpsClient with the public/secret keys when both are present", async () => {
+    process.env.VOLTAGENT_PUBLIC_KEY = "pk_test_123";
+    process.env.VOLTAGENT_SECRET_KEY = "sk_test_456";
+
     await import("./index");
 
-    expect(voltOpsClientCalls).toHaveLength(0);
-    expect(voltAgentCalls[0].voltOpsClient).toBeUndefined();
+    expect(coreMocks.VoltOpsClient).toHaveBeenCalledWith({
+      publicKey: "pk_test_123",
+      secretKey: "sk_test_456",
+    });
+
+    const options = coreMocks.VoltAgent.mock.calls[0][0];
+    expect(options.voltOpsClient).toEqual({
+      __marker: "voltOpsClientInstance",
+      opts: { publicKey: "pk_test_123", secretKey: "sk_test_456" },
+    });
   });
 
-  it("does not attach a VoltOpsClient when only one credential is present", async () => {
-    process.env.VOLTAGENT_PUBLIC_KEY = "pk_test_only";
+  it.each([
+    ["only the public key", { VOLTAGENT_PUBLIC_KEY: "pk_test_123" }],
+    ["only the secret key", { VOLTAGENT_SECRET_KEY: "sk_test_456" }],
+  ])("does not configure a VoltOpsClient when %s is present", async (_label, envVars) => {
+    Object.assign(process.env, envVars);
 
     await import("./index");
 
-    expect(voltOpsClientCalls).toHaveLength(0);
-    expect(voltAgentCalls[0].voltOpsClient).toBeUndefined();
-  });
-
-  it("attaches a VoltOpsClient built from env credentials when both are present", async () => {
-    process.env.VOLTAGENT_PUBLIC_KEY = "pk_test";
-    process.env.VOLTAGENT_SECRET_KEY = "sk_test";
-
-    await import("./index");
-
-    expect(voltOpsClientCalls).toEqual([{ publicKey: "pk_test", secretKey: "sk_test" }]);
-    const options = voltAgentCalls[0];
-    expect(options.voltOpsClient).toBeDefined();
-    expect(options.voltOpsClient.publicKey).toBe("pk_test");
-    expect(options.voltOpsClient.secretKey).toBe("sk_test");
+    expect(coreMocks.VoltOpsClient).not.toHaveBeenCalled();
+    const options = coreMocks.VoltAgent.mock.calls[0][0];
+    expect(options).not.toHaveProperty("voltOpsClient");
   });
 });

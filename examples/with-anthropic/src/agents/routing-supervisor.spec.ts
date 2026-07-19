@@ -1,51 +1,35 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-  createTool: (options: unknown) => options,
-}));
-
-const { routingSupervisor } = await import("./routing-supervisor");
-const { mathAgent } = await import("./math-agent");
-const { generalAgent, geographyAgent, historyAgent, scienceAgent } = await import("./specialists");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { mathAgent } from "./math-agent";
+import { routingSupervisor } from "./routing-supervisor";
+import { generalAgent, geographyAgent, historyAgent, scienceAgent } from "./specialists";
 
 describe("routingSupervisor", () => {
-  it("is named 'routing-supervisor' and uses the shared MODEL", () => {
-    expect((routingSupervisor as any).name).toBe("routing-supervisor");
-    expect((routingSupervisor as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(routingSupervisor.model).toBe(MODEL);
   });
 
-  it("registers its full specialist team as sub-agents, in the documented order", () => {
-    expect((routingSupervisor as any).subAgents).toEqual([
-      generalAgent,
-      mathAgent,
-      geographyAgent,
-      historyAgent,
-      scienceAgent,
-    ]);
+  it("has the expected name", () => {
+    expect(routingSupervisor.name).toBe("routing-supervisor");
   });
 
-  it("lists every specialist agent by name in its instructions", () => {
-    const instructions = (routingSupervisor as any).instructions as string;
-    for (const specialist of ["general", "math", "geography", "history", "science"]) {
-      expect(instructions).toMatch(new RegExp(`- ${specialist}:`));
-    }
+  it("instructs routing to a single most appropriate specialist", () => {
+    expect(routingSupervisor.instructions).toContain("supervisor agent");
+    expect(routingSupervisor.instructions).toContain("delegate_task");
+    expect(routingSupervisor.instructions).toContain("- general:");
+    expect(routingSupervisor.instructions).toContain("- math:");
+    expect(routingSupervisor.instructions).toContain("- geography:");
+    expect(routingSupervisor.instructions).toContain("- history:");
+    expect(routingSupervisor.instructions).toContain("- science:");
+    expect(routingSupervisor.instructions).toContain("Do not answer specialist questions yourself.");
   });
 
-  it("instructs the supervisor to delegate rather than answer directly", () => {
-    const instructions = (routingSupervisor as any).instructions as string;
-    expect(instructions).toMatch(/delegate_task tool/);
-    expect(instructions).toMatch(/Do not answer specialist questions yourself\./);
+  it("has the full specialist team configured as sub-agents, in order", () => {
+    const subAgents = routingSupervisor.getSubAgents();
+    expect(subAgents).toEqual([generalAgent, mathAgent, geographyAgent, historyAgent, scienceAgent]);
   });
 
-  it("has no directly-attached tools (routing is done via sub-agent delegation)", () => {
-    expect((routingSupervisor as any).tools).toBeUndefined();
+  it("declares no static tools (delegate_task is synthesized at generation time)", () => {
+    expect(routingSupervisor.getTools()).toHaveLength(0);
   });
 });

@@ -1,37 +1,37 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-  createTool: (options: unknown) => options,
-}));
-
-const { reasoningAgent } = await import("./reasoning-agent");
-const { thinkTool, analyzeTool } = await import("../tools");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { analyzeTool, thinkTool } from "../tools";
+import { reasoningAgent } from "./reasoning-agent";
 
 describe("reasoningAgent", () => {
-  it("is named 'reasoning-agent' and uses the shared MODEL", () => {
-    expect((reasoningAgent as any).name).toBe("reasoning-agent");
-    expect((reasoningAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(reasoningAgent.model).toBe(MODEL);
   });
 
-  it("is wired with the think and analyze tools, in that order", () => {
-    expect((reasoningAgent as any).tools).toEqual([thinkTool, analyzeTool]);
+  it("has the expected name", () => {
+    expect(reasoningAgent.name).toBe("reasoning-agent");
   });
 
-  it("describes the understand/plan/analyze reasoning process", () => {
-    const instructions = (reasoningAgent as any).instructions as string;
-    expect(instructions).toMatch(/\*\*Understanding:\*\*/);
-    expect(instructions).toMatch(/\*\*Planning:\*\*/);
-    expect(instructions).toMatch(/\*\*Analyzing:\*\*/);
-    expect(instructions).toMatch(/think tool/);
-    expect(instructions).toMatch(/analyze tool/);
-    expect(instructions).toMatch(/Do not expose the raw think\/analyze steps/);
+  it("has no purpose set (uses only instructions)", () => {
+    expect(reasoningAgent.purpose).toBeUndefined();
+  });
+
+  it("instructs a structured think/analyze process", () => {
+    expect(reasoningAgent.instructions).toContain("structured reasoning");
+    expect(reasoningAgent.instructions).toContain("**Understanding:**");
+    expect(reasoningAgent.instructions).toContain("**Planning:**");
+    expect(reasoningAgent.instructions).toContain("**Analyzing:**");
+    expect(reasoningAgent.instructions).toContain(
+      "Do not expose the raw think/analyze steps unless the user asks to see your reasoning.",
+    );
+  });
+
+  it("has the think and analyze tools configured, in order", () => {
+    const tools = reasoningAgent.getTools();
+    expect(tools.map((tool) => tool.name)).toEqual([thinkTool.name, analyzeTool.name]);
+  });
+
+  it("has no sub-agents", () => {
+    expect(reasoningAgent.getSubAgents()).toHaveLength(0);
   });
 });

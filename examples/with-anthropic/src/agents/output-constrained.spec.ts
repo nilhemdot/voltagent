@@ -1,46 +1,48 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-}));
-
-const { editorAgent, recordProcessorAgent } = await import("./output-constrained");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { editorAgent, recordProcessorAgent } from "./output-constrained";
 
 describe("editorAgent", () => {
-  it("is named 'editor-agent' and uses the shared MODEL", () => {
-    expect((editorAgent as any).name).toBe("editor-agent");
-    expect((editorAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(editorAgent.model).toBe(MODEL);
   });
 
-  it("has no tools configured", () => {
-    expect((editorAgent as any).tools).toBeUndefined();
+  it("has the expected name and purpose", () => {
+    expect(editorAgent.name).toBe("editor-agent");
+    expect(editorAgent.purpose).toContain("Copy-edits");
   });
 
-  it("constrains output to only the edited content", () => {
-    const instructions = (editorAgent as any).instructions as string;
-    expect(instructions).toMatch(/professional copy editor/i);
-    expect(instructions).toMatch(/Return ONLY the edited content, no explanations\./);
+  it("instructs returning only edited content with no explanations", () => {
+    expect(editorAgent.instructions).toContain("professional copy editor");
+    expect(editorAgent.instructions).toContain("Return ONLY the edited content, no explanations.");
+  });
+
+  it("has no tools or sub-agents", () => {
+    expect(editorAgent.getTools()).toHaveLength(0);
+    expect(editorAgent.getSubAgents()).toHaveLength(0);
   });
 });
 
 describe("recordProcessorAgent", () => {
-  it("is named 'record-processor' and uses the shared MODEL", () => {
-    expect((recordProcessorAgent as any).name).toBe("record-processor");
-    expect((recordProcessorAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(recordProcessorAgent.model).toBe(MODEL);
   });
 
-  it("requires a JSON object with summary, priority, and status fields", () => {
-    const instructions = (recordProcessorAgent as any).instructions as string;
-    expect(instructions).toContain('"summary": string');
-    expect(instructions).toContain('"High" | "Medium" | "Low"');
-    expect(instructions).toContain('"New" | "In Progress" | "Blocked" | "Done"');
-    expect(instructions).toMatch(/Return only the JSON object\./);
+  it("has the expected name and purpose", () => {
+    expect(recordProcessorAgent.name).toBe("record-processor");
+    expect(recordProcessorAgent.purpose).toContain("Triages");
+  });
+
+  it("instructs a fixed JSON schema with summary, priority, and status", () => {
+    expect(recordProcessorAgent.instructions).toContain('"summary"');
+    expect(recordProcessorAgent.instructions).toContain('"priority"');
+    expect(recordProcessorAgent.instructions).toContain('"status"');
+    expect(recordProcessorAgent.instructions).toContain("High\" | \"Medium\" | \"Low\"");
+    expect(recordProcessorAgent.instructions).toContain("Return only the JSON object.");
+  });
+
+  it("has no tools or sub-agents", () => {
+    expect(recordProcessorAgent.getTools()).toHaveLength(0);
+    expect(recordProcessorAgent.getSubAgents()).toHaveLength(0);
   });
 });

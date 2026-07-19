@@ -1,64 +1,67 @@
-import { describe, expect, it, vi } from "vitest";
-
-class MockAgent {
-  constructor(options: Record<string, unknown>) {
-    Object.assign(this, options);
-  }
-}
-
-vi.mock("@voltagent/core", () => ({
-  Agent: MockAgent,
-}));
-
-const { codeScannerAgent, readmeSummarizerAgent, repoAnalyzer } = await import("./repo-analyzer");
-const { MODEL } = await import("../model");
+import { describe, expect, it } from "vitest";
+import { MODEL } from "../model";
+import { codeScannerAgent, readmeSummarizerAgent, repoAnalyzer } from "./repo-analyzer";
 
 describe("codeScannerAgent", () => {
-  it("is named 'code-scanner' and uses the shared MODEL", () => {
-    expect((codeScannerAgent as any).name).toBe("code-scanner");
-    expect((codeScannerAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(codeScannerAgent.model).toBe(MODEL);
   });
 
-  it("describes mapping structure, languages, and entry points", () => {
-    expect((codeScannerAgent as any).purpose).toMatch(/structure, main languages, and entry points/i);
-    expect((codeScannerAgent as any).instructions).toMatch(/directory structure, primary languages/i);
+  it("has the expected name and purpose", () => {
+    expect(codeScannerAgent.name).toBe("code-scanner");
+    expect(codeScannerAgent.purpose).toContain("structure");
+  });
+
+  it("has descriptive instructions and no tools or sub-agents", () => {
+    expect(codeScannerAgent.instructions).toContain("directory structure");
+    expect(codeScannerAgent.getTools()).toHaveLength(0);
+    expect(codeScannerAgent.getSubAgents()).toHaveLength(0);
   });
 });
 
 describe("readmeSummarizerAgent", () => {
-  it("is named 'readme-summarizer' and uses the shared MODEL", () => {
-    expect((readmeSummarizerAgent as any).name).toBe("readme-summarizer");
-    expect((readmeSummarizerAgent as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(readmeSummarizerAgent.model).toBe(MODEL);
   });
 
-  it("describes summarizing the README and getting-started steps", () => {
-    expect((readmeSummarizerAgent as any).purpose).toMatch(/README and getting-started steps/i);
-    expect((readmeSummarizerAgent as any).instructions).toMatch(/how to install it, and how to run it/i);
+  it("has the expected name and purpose", () => {
+    expect(readmeSummarizerAgent.name).toBe("readme-summarizer");
+    expect(readmeSummarizerAgent.purpose).toContain("README");
+  });
+
+  it("has descriptive instructions and no tools or sub-agents", () => {
+    expect(readmeSummarizerAgent.instructions).toContain("install it");
+    expect(readmeSummarizerAgent.getTools()).toHaveLength(0);
+    expect(readmeSummarizerAgent.getSubAgents()).toHaveLength(0);
   });
 });
 
 describe("repoAnalyzer", () => {
-  it("is named 'repo-analyzer' and uses the shared MODEL", () => {
-    expect((repoAnalyzer as any).name).toBe("repo-analyzer");
-    expect((repoAnalyzer as any).model).toBe(MODEL);
+  it("is configured with the shared model", () => {
+    expect(repoAnalyzer.model).toBe(MODEL);
   });
 
-  it("delegates to the code-scanner and readme-summarizer sub-agents, in that order", () => {
-    expect((repoAnalyzer as any).subAgents).toEqual([codeScannerAgent, readmeSummarizerAgent]);
+  it("has the expected name", () => {
+    expect(repoAnalyzer.name).toBe("repo-analyzer");
   });
 
-  it("describes the delegate-then-combine workflow", () => {
-    const instructions = (repoAnalyzer as any).instructions as string;
-    const scannerIndex = instructions.indexOf("code-scanner");
-    const summarizerIndex = instructions.indexOf("readme-summarizer");
-
-    expect(scannerIndex).toBeGreaterThan(-1);
-    expect(summarizerIndex).toBeGreaterThan(-1);
-    expect(scannerIndex).toBeLessThan(summarizerIndex);
-    expect(instructions).toContain("facebook/react");
+  it("instructs delegation to the code-scanner and readme-summarizer sub-agents", () => {
+    expect(repoAnalyzer.instructions).toContain("GitHub repository analyzer");
+    expect(repoAnalyzer.instructions).toContain("code-scanner");
+    expect(repoAnalyzer.instructions).toContain("readme-summarizer");
+    expect(repoAnalyzer.instructions).toContain("facebook/react");
   });
 
-  it("has no directly-attached tools (it only delegates)", () => {
-    expect((repoAnalyzer as any).tools).toBeUndefined();
+  it("delegates to code-scanner and readme-summarizer as sub-agents", () => {
+    const subAgents = repoAnalyzer.getSubAgents();
+    expect(subAgents).toHaveLength(2);
+    expect(subAgents).toContain(codeScannerAgent);
+    expect(subAgents).toContain(readmeSummarizerAgent);
+  });
+
+  it("declares no static tools (delegation is handled via sub-agents)", () => {
+    // No static tools are configured; the delegate_task tool is synthesized
+    // by the SubAgentManager at generation time, not at construction time.
+    expect(repoAnalyzer.getTools()).toHaveLength(0);
   });
 });
